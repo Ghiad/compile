@@ -1,299 +1,5 @@
 #include "Parser.h"
 
-bool Parser::FACTOR() {
-	int count_now = cur_count;//记录当前非终结符接收开始位置
-	Token_type left = factor;
-	Token_type var = variable;
-	Token_type newType;
-	std::string tmp_name = "";
-	ExprAST* v;
-	UnaryExprAST* tmp_v;
-	std::vector<ExprAST*> args;
-
-	UnaryOpKind op = UnaryOpKind::negKind;
-	int v_int;
-	double v_d;
-	bool v_b;
-	char** endPtr = NULL;
-	if (lexer.get_type() == tok_identifier) { //factor->variable检查
-		if (VARIABLE()) { //VARIABLE()将AST入栈
-			return true;
-		}
-	}
-	cur_count = count_now; //factor->variable未接收，复位
-	lexer.getTOKEN(cur_count - 1);//重新获取对应的TOKEN
-
-	if (lexer.get_type() == tok_identifier && n_stack.top() == NULL)
-		n_stack.pop();
-
-	switch (lexer.get_type()) {
-	case Token_type::tok_boolc:
-		if (lexer.get_body()[0] == 't')
-			v_b = true;
-		else
-			v_b = false;
-		v = new BoolExprAST(v_b, lexer.get_row());
-		v->expr_type = ExprType::BoolExpr;
-		n_stack.push(v);
-		return true;
-		break;
-	case Token_type::tok_identifier:
-		tmp_name = lexer.get_body();
-		lexer.getTOKEN(cur_count++);
-		newType = lexer.get_type();
-
-		if (newType == tok_delimiter && lexer.get_body()[0] == '(') {
-
-			lexer.getTOKEN(cur_count++);
-			if (lexer.get_body()[0] == ')') { //对应无参数函数调用
-				v = new CallFunctionExprAST(tmp_name, args, false, lexer.get_row());
-				v->expr_type = ExprType::CallFuncExpr;
-				n_stack.push(v);
-				return true;
-			}
-			else if (EXPRESSION_LIST(&args)) {//对应 factor ->id(exp)
-				lexer.getTOKEN(cur_count++);
-				if (lexer.get_body()[0] == ')') {
-					v = new CallFunctionExprAST(tmp_name, args, false, lexer.get_row());
-					v->expr_type = ExprType::CallFuncExpr;
-					n_stack.push(v);
-					return true;
-				}
-			}
-		}
-		else {
-			cur_count--;
-			v = new VariableExprAST(tmp_name, lexer.get_row());
-			v->expr_type = ExprType::Variable;
-			n_stack.push(v);
-			return true;
-		};//接收factor->id
-		break;
-	case Token_type::tok_integer:
-		v_int = stoi(lexer.get_body());
-		v = new NumberExprAST(v_int, lexer.get_row());
-		v->expr_type = ExprType::NumberExpr;
-		n_stack.push(v);
-		return true;
-	case Token_type::tok_real:
-		v_int = lexer.get_body().length();
-		v_d = strtod(lexer.get_body().data(), endPtr);
-		v = new RealExprAST(v_d, lexer.get_row());
-		v->expr_type = ExprType::RealExpr;
-		n_stack.push(v);
-		return true;
-	case Token_type::tok_not:
-		lexer.getTOKEN(cur_count++);
-		if (FACTOR()) {
-			ExprAST * tmp = (ExprAST*)n_stack.top();
-			n_stack.pop();
-			v = new UnaryExprAST(UnaryOpKind::notKind, tmp, lexer.get_row());
-			tmp_v = (UnaryExprAST*)v;
-			//	tmp_v->type = tmp->expr_type;
-			//  其他属性赋值
-
-			v->expr_type = ExprType::UnaryExpr;
-			n_stack.push(v);
-			return true;
-		}
-		break;
-	case Token_type::tok_letter:
-		v = new CharExprAST(lexer.get_body()[0], lexer.get_row());
-		v->expr_type = ExprType::CharExpr;
-		n_stack.push(v);
-		return true;
-	case Token_type::tok_delimiter:
-		if (lexer.get_body()[0] == '(') {
-			lexer.getTOKEN(cur_count++);
-			if (EXPRESSION()) {
-				lexer.getTOKEN(cur_count++);
-				if (lexer.get_body()[0] == ')')
-					return true;
-			}
-		}
-		break;
-	case Token_type::tok_addop:
-		if (lexer.get_body()[0] == '-') {
-			lexer.getTOKEN(cur_count++);
-			if (FACTOR()) {
-				op = UnaryOpKind::negKind;
-				v = (ExprAST*)n_stack.top();
-				n_stack.pop();
-				tmp_v = new UnaryExprAST(op, v, lexer.get_row());
-				tmp_v->expr_type = ExprType::UnaryExpr;
-				n_stack.push(tmp_v);
-				return true;
-			}
-		}
-		else if (lexer.get_body()[0] == '+') {
-			lexer.getTOKEN(cur_count++);
-			return FACTOR();
-		}
-		break;
-	default:
-		break;
-	}
-	std::cout << "error line" << std::setw(3) << lexer.get_row() << ":FACTOR accept failed. ";
-	std::cout << "body: " << lexer.get_body() << std::endl;
-	return false;
-}
-
-bool Parser::TERM1() {
-	if (lexer.get_type() == tok_mulop) {
-		BinaryOpKind op;
-		switch (lexer.get_body()[0]) {
-		case '*':op = BinaryOpKind::mulKind;     break;
-		case '/':op = BinaryOpKind::divRealKind; break;
-		case 'a':op = BinaryOpKind::andKind;     break;
-		case 'd':op = BinaryOpKind::divKind;     break;
-		case 'm':op = BinaryOpKind::modKind;     break;
-		default:
-			break;
-		}
-		lexer.getTOKEN(cur_count++);
-		ExprAST*L = (ExprAST*)n_stack.top(); //获取之前存入的L端Expr
-		n_stack.pop();
-		if (FACTOR()) {
-			ExprAST *R = (ExprAST*)n_stack.top();
-			n_stack.pop();
-			BinaryExprAST* AST_TERM1 = new BinaryExprAST(op, L, R, lexer.get_row());
-			AST_TERM1->expr_type = ExprType::BinaryExpr;
-			n_stack.push(AST_TERM1);
-			lexer.getTOKEN(cur_count++);
-			if (TERM1()) {
-				return true;
-			}
-		}
-	}
-	else {
-		Token_type tmp = lexer.get_type();
-		std::string tmps = lexer.get_body();
-		if (tmps[0] == ')' || tmps[0] == '\'' || tmps[0] == ';' || tmps[0] == ',' ||
-			tmps[0] == ']' || tmp == tok_addop || !tmps.compare("do") ||
-			!tmps.compare("else") || tmp == tok_end ||
-			!tmps.compare("of") || tmp == tok_relop ||
-			!tmps.compare("then") || !tmps.compare("to") ||
-			!tmps.compare("until")) { //对应 term1->空
-			cur_count--;
-			return true;
-		}
-	}
-	return false;
-}
-
-bool Parser::TERM() {
-	if (FACTOR()) {
-		lexer.getTOKEN(cur_count++);
-		if (TERM1()) {
-			/*BinaryExprAST* tmp = (BinaryExprAST*)n_stack.top();
-			n_stack.pop();
-			if (tmp != NULL) { //不是TERM->FACTOR
-				ExprAST * left = (ExprAST*)n_stack.top();
-				n_stack.pop();
-				tmp->LExpr = left;
-				n_stack.push(tmp);
-				return true;
-			} */
-			//于下层函数构造AST并存入stack
-			return true;
-		}
-	}
-	return false;
-}
-
-bool Parser::SEXP1() {
-	Token_type tmp = lexer.get_type();
-	std::string tmps = lexer.get_body();
-	BinaryOpKind op;
-	if (lexer.get_type() == tok_addop) {
-		switch (lexer.get_body()[0]) {
-		case '+':op = BinaryOpKind::plusKind;  break;
-		case '-':op = BinaryOpKind::minusKind; break;
-		case 'o':op = BinaryOpKind::orKind;    break;
-		default:
-			break;
-		}
-		lexer.getTOKEN(cur_count++);
-		if (TERM()) {
-			ExprAST* R1 = (ExprAST*)n_stack.top();
-			n_stack.pop();
-			ExprAST* L1 = (ExprAST*)n_stack.top();
-			n_stack.pop();
-			BinaryExprAST* tmp1 = new BinaryExprAST(op, L1, R1, lexer.get_row());
-			n_stack.push(tmp1);
-			tmp1->expr_type = ExprType::BinaryExpr;
-			lexer.getTOKEN(cur_count++);
-			if (SEXP1()) {
-				/*	BinaryExprAST* tmp = (BinaryExprAST*)n_stack.top();
-					n_stack.pop();
-					if (tmp != NULL) {
-						tmp->LExpr = R1;
-						R1 = tmp;
-					}
-					BinaryExprAST* SEXP1AST = new BinaryExprAST(op, NULL, R1, lexer.get_row());
-					SEXP1AST->expr_type = ExprType::BinaryExpr;
-					n_stack.push(SEXP1AST); */
-				return true;
-			}
-		}
-		return false;
-	}
-
-	else if (tmps[0] == ')' || tmps[0] == '\'' || tmps[0] == ',' ||
-		tmps[0] == ';' || tmps[0] == ']' || !tmps.compare("do")
-		|| !tmps.compare("else") || !tmps.compare("end")
-		|| !tmps.compare("of") || !tmps.compare("then")
-		|| !tmps.compare("to") || !tmps.compare("until")
-		|| tmp == tok_relop) { //对应 sexp'->空
-		cur_count--;
-		//n_stack.push(NULL);
-		return true;
-	}
-	else return false;
-}
-
-bool Parser::SIMPLE_EXPRESSION() {
-	if (lexer.get_body()[0] == '-') {
-		UnaryOpKind op = UnaryOpKind::negKind;
-		lexer.getTOKEN(cur_count++);
-		if (TERM()) {
-			ExprAST * term = (ExprAST*)n_stack.top();
-			UnaryExprAST *n_term = new UnaryExprAST(op, term, term->lineNum);
-			n_term->expr_type = ExprType::UnaryExpr;
-			n_stack.push(n_term);
-			lexer.getTOKEN(cur_count++);
-			if (SEXP1()) {
-				/*BinaryExprAST* ast2 = (BinaryExprAST*)n_stack.top();
-				n_stack.pop();
-				if (ast2 != NULL) { //不等则说明不是SEXP1->空，否则说明是
-					ExprAST * ast1 = (ExprAST*)n_stack.top();
-					n_stack.pop();
-					ast2->LExpr = ast1;
-					n_stack.push(ast2);
-				} */
-				return true;
-			}
-		}
-	}
-	if (lexer.get_body()[0] == '+')
-		lexer.getTOKEN(cur_count++);//对应 SEXP->+TERM
-	if (TERM()) {
-		lexer.getTOKEN(cur_count++);
-		if (SEXP1()) {
-			/*BinaryExprAST* ast2 = (BinaryExprAST*)n_stack.top();
-			n_stack.pop();
-			if (ast2 != NULL) { //不等则说明不是SEXP1->空，否则说明是
-				ExprAST * ast1 = (ExprAST*)n_stack.top();
-				n_stack.pop();
-				ast2->LExpr = ast1;
-				n_stack.push(ast2);
-			}*/
-			return true;
-		}
-	}
-	return false;
-}
-
 Parser::Parser(std::string input) {
 	lexer.file_initialize(input);
 	cur_count = 1;
@@ -302,235 +8,11 @@ Parser::Parser(std::string input) {
 	c_value = new constValue(x);
 }
 
-bool Parser::EXPRESSION() {
-	if (SIMPLE_EXPRESSION()) {
-		lexer.getTOKEN(cur_count++);
-		if (lexer.get_type() == tok_relop) {
-			BinaryOpKind op;
-			switch (lexer.get_body()[0]) {
-			case '=':op = BinaryOpKind::eqKind; break;
-			case '>':
-				if (lexer.get_body().length() >= 2)
-					op = BinaryOpKind::geKind;
-				else
-					op = BinaryOpKind::gtKind;
-				break;
-			case '<':
-				if (lexer.get_body().length() >= 2) {
-					switch (lexer.get_body()[1]) {
-					case '>':op = BinaryOpKind::ueqKind; break;
-					case '=':op = BinaryOpKind::leKind;  break;
-					default:
-						break;
-					}
-				}
-				else
-					op = BinaryOpKind::ltKind;
-			default:
-				break;
-			}
-			lexer.getTOKEN(cur_count++);
-			if (SIMPLE_EXPRESSION()) {
-				ExprAST* R = (ExprAST*)n_stack.top();
-				n_stack.pop();
-				ExprAST* L = (ExprAST*)n_stack.top();
-				n_stack.pop();
-				BinaryExprAST* AST = new BinaryExprAST(op, L, R, lexer.get_row());
-				AST->expr_type = ExprType::BinaryExpr;
-				n_stack.push(AST);
-				return true;
-			}
-			n_stack.push(NULL);
-			return false;
-		}
-		else {
-			//对应exp->simple_exp
-			cur_count--;
-			return true;
-		}
-	}
-
-	n_stack.push(NULL);
-	return false;
+void Parser::start() {
+	lexer.getTOKEN(0);
 }
 
-bool Parser::EXP1(std::vector<ExprAST*>* e_v) {
-	if (lexer.get_body()[0] == ')' ||
-		lexer.get_body()[0] == ']') { //对应exp1->空
-		cur_count--;
-		//	n_stack.push(NULL);
-		return true;
-	}
-	if (lexer.get_body()[0] == ',') {
-		lexer.getTOKEN(cur_count++);
-		if (EXPRESSION()) {
-			ExprAST * AST = (ExprAST*)n_stack.top();
-			n_stack.pop();
-			e_v->push_back(AST);
-			lexer.getTOKEN(cur_count++);
-			return EXP1(e_v);
-		}
-	}
-	std::cout << "error line" << std::setw(3) << lexer.get_row() << ":EXP1 错误" << std::endl;
-	return false;
-}
-
-bool Parser::EXPRESSION_LIST(std::vector<ExprAST*>* p) {
-	if (EXPRESSION()) {
-		ExprAST * AST = (ExprAST*)n_stack.top();
-		n_stack.pop();
-		p->push_back(AST);
-		lexer.getTOKEN(cur_count++);
-		return EXP1(p);
-	}
-	return false;
-}
-
-bool Parser::PROCEDURE_CALL(bool* flag) {
-	bool result = true;
-	*flag = true;
-	int curNow = cur_count - 1;
-	if (lexer.get_type() == tok_identifier) {
-		std::string callee = lexer.get_body();
-		lexer.getTOKEN(cur_count++);
-		if (lexer.get_body().compare("(") == 0) {
-			lexer.getTOKEN(cur_count++);
-			std::vector<ExprAST*> index;
-			if (lexer.get_body()[0] == ')') {
-				CallProcedureExprAST* callP = new CallProcedureExprAST(callee, index, lexer.get_row());
-				callP->expr_type = ExprType::CallProcExpr;
-				n_stack.push(callP);
-				return true;
-			}
-			else if (EXPRESSION_LIST(&index)) {
-				lexer.getTOKEN(cur_count++);
-				if (lexer.get_body().compare(")") == 0) {
-					CallProcedureExprAST* callP = new CallProcedureExprAST(callee, index, lexer.get_row());
-					callP->expr_type = ExprType::CallProcExpr;
-					n_stack.push(callP);
-					return true;
-				}
-				else {
-					n_stack.push(NULL);
-					return false;
-				}
-			}
-			else {
-				n_stack.push(NULL);
-				return false;
-			}
-
-		}
-		else if (lexer.get_body().compare(";") == 0
-			|| lexer.get_type() == tok_end
-			|| lexer.get_body().compare("until") == 0
-			|| lexer.get_body().compare("else") == 0) {
-			cur_count--;
-			std::vector<ExprAST*> index;//绌哄€?
-			CallProcedureExprAST* callP = new CallProcedureExprAST(callee, index, lexer.get_row());
-			callP->expr_type = ExprType::CallProcExpr;
-			n_stack.push(callP);
-			return true;
-		}
-		else {
-			cur_count = curNow;
-			//lexer.getTOKEN(cur_count++);
-			*flag = false;
-			return false;
-		}
-	}
-	return false;
-
-
-}
-
-bool Parser::UPDOWN(bool* rd) {
-	if (lexer.get_type() == tok_keys) {
-		std::string to = "to";
-		std::string downto = "downto";
-		std::string body = lexer.get_body();
-		if (!body.compare(to)) {
-			*rd = true;
-			return true;
-		}
-		if (!body.compare(to)) {
-			*rd = false;
-			return true;
-		}
-	}
-	return false;
-}
-
-bool Parser::ID_VARPART() {
-	ExprAST* name = (ExprAST*)n_stack.top();
-	n_stack.pop();
-	if (lexer.get_body()[0] == '[') {
-		std::vector<ExprAST*> index;
-		lexer.getTOKEN(cur_count++);
-		if (EXPRESSION_LIST(&index)) {
-			ArrayVariableExprAST* tmp = new ArrayVariableExprAST(name, index, lexer.get_row());
-			tmp->expr_type = ExprType::ArrayVariable;
-			n_stack.push(tmp);
-			lexer.getTOKEN(cur_count++);
-			if (lexer.get_body()[0] == ']') {
-				return true;
-			}
-		}
-	}
-	else if (lexer.get_body()[0] == '.') {
-		lexer.getTOKEN(cur_count++);
-		if (lexer.get_type() == tok_identifier) {
-			RecordVariableExprAST* tmp = new RecordVariableExprAST(name, lexer.get_body(), lexer.get_row());
-			tmp->expr_type = ExprType::RecordVariable;
-			n_stack.push(tmp);
-			return true;
-		}
-	}
-	n_stack.push(name);
-	return false;
-}
-
-
-bool Parser::ID_VARPARTS() {
-	ExprAST* name = (ExprAST*)n_stack.top();
-	n_stack.pop();
-	std::string s = lexer.get_body();
-	Token_type type = lexer.get_type();
-	if (s[0] == '.' || s[0] == '[') { //对应结构体
-		n_stack.push(name);
-		if (ID_VARPART()) {
-			lexer.getTOKEN(cur_count++);
-			return ID_VARPARTS();
-		}
-	}
-	if (s[0] == ')' || s[0] == ',' || s[0] == ';' ||
-		s[0] == ']' || type == tok_addop || type == tok_assignop ||
-		!s.compare("do") || !s.compare("else") || type == tok_end ||
-		type == tok_mulop || !s.compare("of") || type == tok_relop ||
-		!s.compare("then") || !s.compare("to") || !s.compare("until")) {
-		//对应 ID_VARPARTS->空
-		n_stack.push(name);
-		cur_count--;
-		return true;
-	}
-
-	return false;
-}
-
-bool Parser::VARIABLE() {
-	if (lexer.get_type() == tok_identifier) { //获取终结符 id
-		VariableExprAST * name = new VariableExprAST(lexer.get_body(), lexer.get_row());
-		name->expr_type = ExprType::Variable;
-		n_stack.push(name);
-		lexer.getTOKEN(cur_count++);
-		if (ID_VARPARTS()) { //在后续函数中直接将AST生成并入栈，若成功接收则直接返回真
-			return true;
-		}
-	}
-	n_stack.push(NULL);
-	return false;
-}
-
+//programstruce->program_head;program_body
 bool Parser::PROGRAMSTRUCE() {
 	bool result = true;
 	if (!PROGRAM_HEAD()) {
@@ -554,6 +36,7 @@ bool Parser::PROGRAMSTRUCE() {
 	return false;
 }
 
+//program_head->program id(idlist)|program id
 bool Parser::PROGRAM_HEAD() {
 	if (lexer.get_type() == tok_program) {
 		lexer.getTOKEN(cur_count++);
@@ -595,6 +78,7 @@ bool Parser::PROGRAM_HEAD() {
 	return false;
 }
 
+//program_body->const_declarations
 bool Parser::PROGRAM_BODY() {
 	bool result = true;
 	if (!CONST_DECLARATIONS(&cAst_vector, 1)) {
@@ -667,6 +151,104 @@ bool Parser::PROGRAM_BODY() {
 	return result;
 }
 
+/*
+idlist->id idlist'
+idlist'->,id idlist'|ε
+*/
+bool Parser::IDLIST(std::vector<std::string>* v_s) {
+	if (lexer.get_type() == tok_identifier) {
+		(*v_s).push_back(lexer.get_body());
+		lexer.getTOKEN(cur_count++);
+		return IDLIST1(v_s);
+	}
+	return false;
+}
+
+/*
+idlist->id idlist'
+idlist'->,id idlist'|ε
+*/
+bool Parser::IDLIST1(std::vector<std::string>* v_s) {
+	int emp_count = cur_count - 1;//记录下若产生空，cur_count的值
+	if (lexer.get_type() == tok_delimiter
+		&& lexer.get_body()[0] == ',') {
+		lexer.getTOKEN(cur_count++);
+		if (lexer.get_type() == tok_identifier) {
+			(*v_s).push_back(lexer.get_body());
+			lexer.getTOKEN(cur_count++);
+			if (IDLIST1(v_s))
+				return true;
+		}
+	}
+	if (lexer.get_body()[0] == ':' || lexer.get_body()[0] == ')') { //对应 idlist'->空
+		cur_count = emp_count;
+		return true;
+	}
+	return false;
+}
+
+//const_declarations->const const_declaration;|ε
+bool Parser::CONST_DECLARATIONS(std::vector<ConstAST*>* p, int type) {
+	int emp_count = cur_count - 1;//记录下若产生空，cur_count的值
+	if (lexer.get_type() == tok_const) {
+		lexer.getTOKEN(cur_count++);
+		if (CONST_DECLARATION(p, type)) {
+			lexer.getTOKEN(cur_count++);
+			if (lexer.get_type() == tok_delimiter
+				&& lexer.get_body()[0] == ';')
+				return true;
+		}
+	}
+	Token_type tmp = lexer.get_type();
+	if (tmp == tok_array || tmp == tok_begin ||
+		tmp == tok_boolean || tmp == tok_char ||
+		tmp == tok_function || tmp == tok_integer ||
+		tmp == tok_procedure || tmp == tok_real ||
+		tmp == tok_var) {//对应C_DS->空
+		cur_count = emp_count;
+		return true;
+	}
+	return false;
+}
+
+/*
+const_declaration-> id = const_value const’
+const’-> ; id=const_value const’|ε
+产生ast
+*/
+bool Parser::CONST_DECLARATION(std::vector<ConstAST*>* p, int type) {
+	if (lexer.get_type() == tok_identifier) {
+		std::string name = lexer.get_body();
+		lexer.getTOKEN(cur_count++);
+		if (lexer.get_body()[0] == '=') {
+			lexer.getTOKEN(cur_count++);
+			if (CONST_VALUE()) {
+				lexer.getTOKEN(cur_count++);
+				ConstAST* con = new ConstAST(name, (BasicTypeAST*)ast_type, *c_value);
+				con->value = *c_value;
+				con->value.s = (*c_value).s;
+				con->lineNum = lexer.get_row();
+
+				(*p).push_back(con);
+				if (CONST1(p)) {
+					std::vector<ConstAST*>::iterator it;
+					for (it = p->begin(); it != p->end(); it++) {
+						(*it)->isGlobal = type;
+					}
+					return true;
+				}
+			}
+		}
+	}
+	std::cout << "error line" << std::setw(3) << lexer.get_row() << ":CONST DECLARATION ILLEGAL" << std::endl;
+	return false;
+}
+
+/*
+const_declaration-> id = const_value const’
+const’-> ; id=const_value const’|ε
+产生ast
+*/
 bool Parser::CONST1(std::vector<ConstAST*>* p) {
 	int emp_count = cur_count - 1;
 	if (lexer.get_type() == tok_delimiter
@@ -702,6 +284,7 @@ bool Parser::CONST1(std::vector<ConstAST*>* p) {
 	return false;
 }
 
+//const_value->+num|-num|num|‘letter’|+id|-id|id|true|false|not true|not false
 bool Parser::CONST_VALUE() {
 	std::string tmps;
 	Token_type tmp;
@@ -750,13 +333,19 @@ bool Parser::CONST_VALUE() {
 		else if (tmp == tok_integer || tmp == tok_real) {
 			switch (tmp) {
 			case tok_integer:
-				c_value->i = atoi(lexer.get_body().data());//将字符串转换为整型号
+				if(c_value->s.compare("+"))
+					c_value->i = atoi(lexer.get_body().data());//将字符串转换为整型号
+				else
+					c_value->i = -atoi(lexer.get_body().data());//将字符串转换为整型号
 				ast_type = intTypeAST;
 				return true;
 			case tok_real:
 				tmps = lexer.get_body();
 				char *tmp_ptr;
-				c_value->d = strtod(tmps.data(), &tmp_ptr);//转换成d型
+				if(c_value->s.compare("+"))
+					c_value->d = strtod(tmps.data(), &tmp_ptr);//转换成d型
+				else 
+					c_value->d = -strtod(tmps.data(), &tmp_ptr);//转换成d型
 				ast_type = realTypeAST;
 			}
 		}
@@ -780,169 +369,97 @@ bool Parser::CONST_VALUE() {
 	return false;
 }
 
-bool Parser::CONST_DECLARATION(std::vector<ConstAST*>* p, int type) {
+//type_declarations->type type_declaration;|ε
+bool Parser::TYPE_DECLARATIONS(std::vector<ChangeNameTypeAST*>*p) {
+	int tmp_count = cur_count - 1;
+	Token_type tmp_type = lexer.get_type();
+	if (tmp_type == tok_type) {
+		lexer.getTOKEN(cur_count++);
+		if (TYPE_DECLARATION(p)) {
+			lexer.getTOKEN(cur_count++);
+			if (lexer.get_body()[0] == ';') {
+				//AST
+				return true;
+			}
+		}
+	}
+	if (tmp_type == tok_var || tmp_type == tok_function
+		|| tmp_type == tok_begin || tmp_type == tok_procedure
+		) {//对应TYPE_DECLARATIONS->空
+		cur_count--;
+		return true;
+	}
+	cur_count = tmp_count;
+	return false;
+}
+
+/*
+type_declaration->id = type_ type_declaration’
+type_declaration’->;id = type_ type_declaration’|ε
+*/
+bool Parser::TYPE_DECLARATION(std::vector<ChangeNameTypeAST*>*p) {
 	if (lexer.get_type() == tok_identifier) {
 		std::string name = lexer.get_body();
 		lexer.getTOKEN(cur_count++);
 		if (lexer.get_body()[0] == '=') {
 			lexer.getTOKEN(cur_count++);
-			if (CONST_VALUE()) {
+			if (TYPE()) {
+				ChangeNameTypeAST* tmp_ast =
+					new ChangeNameTypeAST(name, ast_type);
+				tmp_ast->lineNum = lexer.get_row();
+				(*p).push_back(tmp_ast);
 				lexer.getTOKEN(cur_count++);
-				ConstAST* con = new ConstAST(name, (BasicTypeAST*)ast_type, *c_value);
-				con->value = *c_value;
-				con->value.s = (*c_value).s;
-				con->lineNum = lexer.get_row();
-
-				(*p).push_back(con);
-				if (CONST1(p)) {
-					std::vector<ConstAST*>::iterator it;
-					for (it = p->begin(); it != p->end(); it++) {
-						(*it)->isGlobal = type;
-					}
+				if (TYPE_DECLARATION1(p)) {
+					//AST
 					return true;
 				}
 			}
 		}
 	}
-	std::cout << "error line" << std::setw(3) << lexer.get_row() << ":CONST DECLARATION ILLEGAL" << std::endl;
+	std::cout << "error line" << std::setw(3) << lexer.get_row() << ":TYPE DECLARATION ILLEGAL" << std::endl;
 	return false;
 }
 
-bool Parser::CONST_DECLARATIONS(std::vector<ConstAST*>* p, int type) {
-	int emp_count = cur_count - 1;//记录下若产生空，cur_count的值
-	if (lexer.get_type() == tok_const) {
-		lexer.getTOKEN(cur_count++);
-		if (CONST_DECLARATION(p, type)) {
-			lexer.getTOKEN(cur_count++);
-			if (lexer.get_type() == tok_delimiter
-				&& lexer.get_body()[0] == ';')
-				return true;
-		}
-	}
-	Token_type tmp = lexer.get_type();
-	if (tmp == tok_array || tmp == tok_begin ||
-		tmp == tok_boolean || tmp == tok_char ||
-		tmp == tok_function || tmp == tok_integer ||
-		tmp == tok_procedure || tmp == tok_real ||
-		tmp == tok_var) {//对应C_DS->空
-		cur_count = emp_count;
-		return true;
-	}
-	return false;
-}
-
-bool Parser::BASIC_TYPE() {
-	switch (lexer.get_type()) {
-	case tok_integer:
-	case tok_number:
-		ast_type = intTypeAST;
-		return true;
-	case tok_real:
-		ast_type = realTypeAST;
-		return true;
-	case tok_boolean:
-		ast_type = boolTypeAST;
-		return true;
-	case tok_char:
-		ast_type = charTypeAST;
-		return true;
-	default:
-		break;
-	}
-	return false;
-}
-
-bool Parser::PERIOD(std::vector<ConstAST*> *con1, std::vector<ConstAST*> *con2) {
+/*
+type_declaration->id = type_ type_declaration’
+type_declaration’->;id = type_ type_declaration’|ε
+*/
+bool Parser::TYPE_DECLARATION1(std::vector<ChangeNameTypeAST*>* p) {
 	int emp_count = cur_count - 1;
-	Token_type tmp = lexer.get_type();
-	if (tmp == tok_integer || tmp == tok_identifier
-		|| (tmp == tok_addop && lexer.get_body()[0] != 'o') || tmp == tok_letter) {
-		if (CONST_VALUE()) {
-			ConstAST* c1 = new ConstAST("c1", (BasicTypeAST*)ast_type, *c_value);
-			c1->value = *c_value;
-			c1->value.s = (*c_value).s;
-			c1->lineNum = lexer.get_row();
+	if (lexer.get_body()[0] == ';') {
+		lexer.getTOKEN(cur_count++);
+		if (lexer.get_type() == tok_identifier) {
+			std::string name = lexer.get_body();
 			lexer.getTOKEN(cur_count++);
-			std::string tmps = lexer.get_body();
-			if (tmps.length() == 2 && tmps[1] == '.') {
+			if (lexer.get_body()[0] == '=') {
 				lexer.getTOKEN(cur_count++);
-				if (CONST_VALUE()) {
-					ConstAST* c2 = new ConstAST("c2", (BasicTypeAST*)ast_type, *c_value);
-					c2->value = *c_value;
-					c2->value.s = (*c_value).s;
-					c2->lineNum = lexer.get_row();
-					(*con1).push_back(c1);
-					(*con2).push_back(c2);
+				if (TYPE()) {
+					ChangeNameTypeAST* tmp_ast =
+						new ChangeNameTypeAST(name, ast_type);
+					tmp_ast->lineNum = lexer.get_row();
+					(*p).push_back(tmp_ast);
 					lexer.getTOKEN(cur_count++);
-					if (PERIOD1(con1, con2)) {
-						//
+					if (TYPE_DECLARATION1(p)) {
 						return true;
 					}
 				}
 			}
+			std::cout << "error line" << std::setw(3) << lexer.get_row() << ":TYPE DECLARATION 非法" << std::endl;
+			return false;
 		}
 
-	}
-	cur_count = emp_count;
-	return false;
-}
-
-bool Parser::PERIOD1(std::vector<ConstAST*> *con1, std::vector<ConstAST*> *con2) {
-	int emp_count = cur_count - 1;
-	if (lexer.get_body()[0] == ',') {
-		lexer.getTOKEN(cur_count++);
-		if (CONST_VALUE()) {
-			ConstAST* c1 = new ConstAST("c1", (BasicTypeAST*)ast_type, *c_value);
-			c1->value = *c_value;
-			c1->value.s = (*c_value).s;
-			c1->lineNum = lexer.get_row();
-			lexer.getTOKEN(cur_count++);
-			std::string tmps = lexer.get_body();
-			if (tmps.length() == 2 && tmps[1] == '.') {
-				lexer.getTOKEN(cur_count++);
-				if (CONST_VALUE()) {
-					ConstAST* c2 = new ConstAST("c2", (BasicTypeAST*)ast_type, *c_value);
-					c2->value = *c_value;
-					c2->value.s = (*c_value).s;
-					c2->lineNum = lexer.get_row();
-					(*con1).push_back(c1);
-					(*con2).push_back(c2);
-					lexer.getTOKEN(cur_count++);
-					if (PERIOD1(con1, con2)) {
-						//
-						return true;
-					}
-				}
-			}
-		}
-
-	}
-	if (lexer.get_body()[0] == ']') { //对应 period1->空
+		//对应 产生空
 		cur_count = emp_count;
 		return true;
 	}
 	return false;
 }
 
-bool Parser::RECORD_BODY(std::vector<VariableDeclAST*>* v_list) {
-	int emp_count = cur_count - 1;
-	if (lexer.get_type() == tok_end) {
-		cur_count = emp_count;
-		return true;
-	}
-	if (lexer.get_type() == tok_identifier) {
-		if (VAR_DECLARATION(v_list)) {
-			lexer.getTOKEN(cur_count++);
-			if (lexer.get_body()[0] == ';')
-				//构造AST
-				return true;
-		}
-
-	}
-	cur_count = emp_count;
-	return true;
-}
-
+/*
+type_->basic_type
+|array [period] of basic_type
+|record record_body end
+*/
 bool Parser::TYPE() {
 	std::vector<VariableDeclAST*> tmp;
 	switch (lexer.get_type()) {
@@ -983,85 +500,173 @@ bool Parser::TYPE() {
 	return false;
 }
 
-bool Parser::TYPE_DECLARATION1(std::vector<ChangeNameTypeAST*>* p) {
+//basic_type->integer|real|boolean|char
+bool Parser::BASIC_TYPE() {
+	switch (lexer.get_type()) {
+	case tok_integer:
+	case tok_number:
+		ast_type = intTypeAST;
+		return true;
+	case tok_real:
+		ast_type = realTypeAST;
+		return true;
+	case tok_boolean:
+		ast_type = boolTypeAST;
+		return true;
+	case tok_char:
+		ast_type = charTypeAST;
+		return true;
+	default:
+		break;
+	}
+	return false;
+}
+
+/*
+period->const_value .. const_value period’
+period’->,const_value .. const_value period’|ε
+*/
+bool Parser::PERIOD(std::vector<ConstAST*> *con1, std::vector<ConstAST*> *con2) {
 	int emp_count = cur_count - 1;
-	if (lexer.get_body()[0] == ';') {
-		lexer.getTOKEN(cur_count++);
-		if (lexer.get_type() == tok_identifier) {
-			std::string name = lexer.get_body();
+	Token_type tmp = lexer.get_type();
+	if (tmp == tok_integer || tmp == tok_identifier
+		|| (tmp == tok_addop && lexer.get_body()[0] != 'o') || tmp == tok_letter) {
+		if (CONST_VALUE()) {
+			ConstAST* c1 = new ConstAST("c1", (BasicTypeAST*)ast_type, *c_value);
+			c1->value = *c_value;
+			c1->value.s = (*c_value).s;
+			c1->lineNum = lexer.get_row();
 			lexer.getTOKEN(cur_count++);
-			if (lexer.get_body()[0] == '=') {
+			std::string tmps = lexer.get_body();
+			if (tmps.length() == 2 && tmps[1] == '.') {
 				lexer.getTOKEN(cur_count++);
-				if (TYPE()) {
-					ChangeNameTypeAST* tmp_ast =
-						new ChangeNameTypeAST(name, ast_type);
-					tmp_ast->lineNum = lexer.get_row();
-					(*p).push_back(tmp_ast);
+				if (CONST_VALUE()) {
+					ConstAST* c2 = new ConstAST("c2", (BasicTypeAST*)ast_type, *c_value);
+					c2->value = *c_value;
+					c2->value.s = (*c_value).s;
+					c2->lineNum = lexer.get_row();
+					(*con1).push_back(c1);
+					(*con2).push_back(c2);
 					lexer.getTOKEN(cur_count++);
-					if (TYPE_DECLARATION1(p)) {
+					if (PERIOD1(con1, con2)) {
+						//
 						return true;
 					}
 				}
 			}
-			std::cout << "error line" << std::setw(3) << lexer.get_row() << ":TYPE DECLARATION 非法" << std::endl;
-			return false;
 		}
 
-		//对应 产生空
+	}
+	cur_count = emp_count;
+	return false;
+}
+
+/*
+period->const_value .. const_value period’
+period’->,const_value .. const_value period’|ε
+*/
+bool Parser::PERIOD1(std::vector<ConstAST*> *con1, std::vector<ConstAST*> *con2) {
+	int emp_count = cur_count - 1;
+	if (lexer.get_body()[0] == ',') {
+		lexer.getTOKEN(cur_count++);
+		if (CONST_VALUE()) {
+			ConstAST* c1 = new ConstAST("c1", (BasicTypeAST*)ast_type, *c_value);
+			c1->value = *c_value;
+			c1->value.s = (*c_value).s;
+			c1->lineNum = lexer.get_row();
+			lexer.getTOKEN(cur_count++);
+			std::string tmps = lexer.get_body();
+			if (tmps.length() == 2 && tmps[1] == '.') {
+				lexer.getTOKEN(cur_count++);
+				if (CONST_VALUE()) {
+					ConstAST* c2 = new ConstAST("c2", (BasicTypeAST*)ast_type, *c_value);
+					c2->value = *c_value;
+					c2->value.s = (*c_value).s;
+					c2->lineNum = lexer.get_row();
+					(*con1).push_back(c1);
+					(*con2).push_back(c2);
+					lexer.getTOKEN(cur_count++);
+					if (PERIOD1(con1, con2)) {
+						//
+						return true;
+					}
+				}
+			}
+		}
+
+	}
+	if (lexer.get_body()[0] == ']') { //对应 period1->空
 		cur_count = emp_count;
 		return true;
 	}
 	return false;
 }
 
-
-bool Parser::TYPE_DECLARATION(std::vector<ChangeNameTypeAST*>*p) {
-	if (lexer.get_type() == tok_identifier) {
-		std::string name = lexer.get_body();
-		lexer.getTOKEN(cur_count++);
-		if (lexer.get_body()[0] == '=') {
-			lexer.getTOKEN(cur_count++);
-			if (TYPE()) {
-				ChangeNameTypeAST* tmp_ast =
-					new ChangeNameTypeAST(name, ast_type);
-				tmp_ast->lineNum = lexer.get_row();
-				(*p).push_back(tmp_ast);
-				lexer.getTOKEN(cur_count++);
-				if (TYPE_DECLARATION1(p)) {
-					//AST
-					return true;
-				}
-			}
-		}
-	}
-	std::cout << "error line" << std::setw(3) << lexer.get_row() << ":TYPE DECLARATION ILLEGAL" << std::endl;
-	return false;
-}
-
-
-bool Parser::TYPE_DECLARATIONS(std::vector<ChangeNameTypeAST*>*p) {
-	int tmp_count = cur_count - 1;
-	Token_type tmp_type = lexer.get_type();
-	if (tmp_type == tok_type) {
-		lexer.getTOKEN(cur_count++);
-		if (TYPE_DECLARATION(p)) {
-			lexer.getTOKEN(cur_count++);
-			if (lexer.get_body()[0] == ';') {
-				//AST
-				return true;
-			}
-		}
-	}
-	if (tmp_type == tok_var || tmp_type == tok_function
-		|| tmp_type == tok_begin || tmp_type == tok_procedure
-		) {//对应TYPE_DECLARATIONS->空
-		cur_count--;
+//record_body->var_declaration|ε
+bool Parser::RECORD_BODY(std::vector<VariableDeclAST*>* v_list) {
+	int emp_count = cur_count - 1;
+	if (lexer.get_type() == tok_end) {
+		cur_count = emp_count;
 		return true;
 	}
-	cur_count = tmp_count;
+	if (lexer.get_type() == tok_identifier) {
+		if (VAR_DECLARATION(v_list)) {
+			lexer.getTOKEN(cur_count++);
+			if (lexer.get_body()[0] == ';')
+				//构造AST
+				return true;
+		}
+
+	}
+	cur_count = emp_count;
+	return true;
+}
+
+//var_declarations->var var_declaration;|ε
+bool Parser::VAR_DECLARATIONS(std::vector<VariableDeclAST*>* p) {
+	switch (lexer.get_type()) {
+	case tok_procedure:case tok_function:
+	case  tok_begin://对应VAR_DECLARATIONS->空
+		cur_count--;
+		return true;
+	case tok_var:
+		lexer.getTOKEN(cur_count++);
+		if (VAR_DECLARATION(p)) {
+			lexer.getTOKEN(cur_count++);
+			return lexer.get_body()[0] == ';';
+		}
+	}
 	return false;
 }
 
+/*
+var_declaration->idlist : type_ var’
+var’->;idlist : type_ var’|ε
+*/
+bool Parser::VAR_DECLARATION(std::vector<VariableDeclAST*>* v_list) {
+	std::vector<std::string> tmp;
+	if (IDLIST(&tmp)) {
+		lexer.getTOKEN(cur_count++);
+		if (lexer.get_body()[0] == ':') {
+			lexer.getTOKEN(cur_count++);
+			if (TYPE()) {
+				VariableDeclAST* tmp_vast = new VariableDeclAST((BasicTypeAST*)ast_type, tmp, 0, 1);
+				tmp_vast->lineNum = lexer.get_row();
+				tmp_vast->isGlobal = true;
+				(*v_list).push_back(tmp_vast);
+				lexer.getTOKEN(cur_count++);
+				return VAR1(v_list);
+			}
+		}
+	}
+	std::cout << "error line" << std::setw(3) << lexer.get_row() << ":VARIABLE DECLARATION ILLEGAL" << std::endl;
+	return false;
+}
+
+/*
+var_declaration->idlist : type_ var’
+var’->;idlist : type_ var’|ε
+*/
 bool Parser::VAR1(std::vector<VariableDeclAST*>* v_list) {
 	int emp_count = cur_count - 1;
 	if (lexer.get_body()[0] == ';') {
@@ -1097,42 +702,195 @@ bool Parser::VAR1(std::vector<VariableDeclAST*>* v_list) {
 	return false;
 }
 
-bool Parser::VAR_DECLARATION(std::vector<VariableDeclAST*>* v_list) {
-	std::vector<std::string> tmp;
-	if (IDLIST(&tmp)) {
-		lexer.getTOKEN(cur_count++);
-		if (lexer.get_body()[0] == ':') {
-			lexer.getTOKEN(cur_count++);
-			if (TYPE()) {
-				VariableDeclAST* tmp_vast = new VariableDeclAST((BasicTypeAST*)ast_type, tmp, 0, 1);
-				tmp_vast->lineNum = lexer.get_row();
-				tmp_vast->isGlobal = true;
-				(*v_list).push_back(tmp_vast);
-				lexer.getTOKEN(cur_count++);
-				return VAR1(v_list);
-			}
-		}
-	}
-	std::cout << "error line" << std::setw(3) << lexer.get_row() << ":VARIABLE DECLARATION ILLEGAL" << std::endl;
-	return false;
-}
-
-bool Parser::VAR_DECLARATIONS(std::vector<VariableDeclAST*>* p) {
-	switch (lexer.get_type()) {
-	case tok_procedure:case tok_function:
-	case  tok_begin://对应VAR_DECLARATIONS->空
+//subprogram_declarations->subprogram ; subprogram_declarations|ε
+bool Parser::SUBPROGRAM_DECLARATIONS(std::vector<FunctionAST*>* f_p) {
+	if (lexer.get_type() == tok_begin) {
+		//对应 subprogram_declarations->空
 		cur_count--;
 		return true;
-	case tok_var:
+	}
+	bool result = true;
+	while (lexer.get_type() != tok_begin && lexer.get_type() != tok_eof)
+		/*lexer.get_type() == tok_function
+		|| lexer.get_type() == tok_procedure*/ {
+		result &= SUBPROGRAM(f_p);
 		lexer.getTOKEN(cur_count++);
-		if (VAR_DECLARATION(p)) {
+	}
+	if (lexer.get_type() == tok_begin)
+		cur_count--;
+	return result;
+}
+
+//subprogram->subprogram_head;subprogram_body
+//产生ast
+bool Parser::SUBPROGRAM(std::vector<FunctionAST*>* TOP_f_p) {
+	//构建子程序的ast
+	std::vector<VariableDeclAST*> p;
+	std::vector<ConstAST*> c_p; 
+	std::vector<ChangeNameTypeAST*> name_p;
+	std::vector<VariableDeclAST*> v_p;
+	std::vector<FunctionAST*> f_p;
+	std::string name; //子程序名字
+	int f_type; // 1表示函数，2表示过程
+	bool result = true;
+	if (!SUBPROGRAM_HEAD(&p, &name, &f_type)) {
+		//子程序 头部接收失败
+		std::cout << "error line" << std::setw(3) << lexer.get_row() << ":子程序头部错误" << std::endl;
+		result = false;
+		while (lexer.get_body()[0] != ';'&&lexer.get_type() != tok_begin
+			&& lexer.get_type() != tok_eof) {
 			lexer.getTOKEN(cur_count++);
-			return lexer.get_body()[0] == ';';
+		}
+		if (lexer.get_type() == tok_begin || lexer.get_type() != tok_eof)
+			cur_count--;
+	}
+	lexer.getTOKEN(cur_count++);
+	BlocksType type = BlocksType::function; //默认情况， 避免头部接收失败时未初始化
+	switch (f_type) {
+	case 1:type = BlocksType::function;
+		break;
+	case 2:type = BlocksType::procedure;
+		break;
+	default:
+		break;
+	}
+	if (!SUBPROGRAM_BODY(&c_p, &name_p, &v_p, &f_p)) {
+		//子程序执行语句部分接收失败
+		result = false;
+		n_stack.push(NULL);
+		while (lexer.get_type() != tok_begin
+			&& lexer.get_type() != tok_function
+			&& lexer.get_type() != tok_procedure) {
+			lexer.getTOKEN(cur_count++);
+		}
+		cur_count--;
+	}
+	std::vector<VariableDeclAST*>::iterator it;
+	for (it = v_p.begin();
+		it != v_p.end(); it++) {
+		(*it)->isGlobal = 0;
+	}
+	BeginEndExprAST* tmp = (BeginEndExprAST*)n_stack.top();
+	n_stack.pop();
+	FunctionAST*f;
+	if (tmp == NULL) {
+		f = NULL;
+	}
+	else {
+		f = new FunctionAST(name, p, (BasicTypeAST*)ast_type,
+			c_p, name_p, v_p, f_p, tmp->body, type);
+		f->lineNum = lexer.get_row();
+	}
+	TOP_f_p->push_back(f);
+	//产生FUNCTIONAST并放入TOP_f_p中
+	return result;
+}
+
+/*
+subprogram_head->procedure id formal_parameter
+|functions id formal_parameter:basic_type
+*/
+bool Parser::SUBPROGRAM_HEAD(std::vector<VariableDeclAST*>* p, std::string* name, int* f_type) {
+	switch (lexer.get_type()) {
+	case tok_function:
+		*f_type = 1; //代表function
+		lexer.getTOKEN(cur_count++);
+		if (lexer.get_type() == tok_identifier) {
+			*name = lexer.get_body();
+			lexer.getTOKEN(cur_count++);
+			if (FORMAL_PARAMETER(p)) {
+				lexer.getTOKEN(cur_count++);
+				if (lexer.get_body()[0] == ':') {
+					lexer.getTOKEN(cur_count++);
+					if (BASIC_TYPE()) {
+						lexer.getTOKEN(cur_count++);
+						return lexer.get_body()[0] == ';';
+					}
+				}
+			}
+		}
+		break;
+	case tok_procedure:
+		*f_type = 2; //代表procedure
+		lexer.getTOKEN(cur_count++);
+		if (lexer.get_type() == tok_identifier) {
+			*name = lexer.get_body();
+			lexer.getTOKEN(cur_count++);
+			if (FORMAL_PARAMETER(p)) {
+				lexer.getTOKEN(cur_count++);
+				return lexer.get_body()[0] == ';';
+			}
+		}
+		break;
+	case tok_begin:
+		//对应无subprogram情况
+		return false;
+	default:
+		std::cout << "error line" << std::setw(3) << lexer.get_row() << "：关键词 procedure 或 function 应在子程序开头" << std::endl;
+		break;
+	}
+	return false;
+}
+
+
+//formal_parameter :'(' parameter_list ')' | ε
+bool Parser::FORMAL_PARAMETER(std::vector<VariableDeclAST*>* p) {
+	switch (lexer.get_body()[0]) {
+	case '(':
+		lexer.getTOKEN(cur_count++);
+		if (PARAMETER_LIST(p)) {
+			lexer.getTOKEN(cur_count++);
+			return lexer.get_body()[0] == ')';
+		}
+		break;
+	case ':':case ';':
+		cur_count--;
+		return true;
+	default:
+		break;
+	}
+	return false;
+}
+
+/*
+parameter_list->paramerter paramerter’
+parameter’->;parameterparameter’|ε
+*/
+bool Parser::PARAMETER_LIST(std::vector<VariableDeclAST*>* p) {
+	if (PARAMETER(p)) {
+		lexer.getTOKEN(cur_count++);
+		if (PARAMETER1(p)) {
+			return true;
 		}
 	}
 	return false;
 }
 
+//parameter : var_parameter | value_parameter
+bool Parser::PARAMETER(std::vector<VariableDeclAST*>* p) {
+	switch (lexer.get_type()) {
+	case tok_identifier:
+		if (VALUE_PARAMETER(p, 0)) {
+			return true;
+		}
+		break;
+	case tok_var:
+		lexer.getTOKEN(cur_count++);
+		if (VALUE_PARAMETER(p, 1)) {
+			return true;
+		}
+		break;
+	default:
+		break;
+	}
+	return false;
+}
+
+/*
+formal_parameter->(parameter_list)|ε
+parameter_list->paramerter paramerter’
+parameter’->;parameter parameter’|ε
+*/
 bool Parser::PARAMETER1(std::vector<VariableDeclAST*>* p) {
 	if (lexer.get_body()[0] == ')') {
 		cur_count--;
@@ -1148,6 +906,8 @@ bool Parser::PARAMETER1(std::vector<VariableDeclAST*>* p) {
 	return false;
 }
 
+//value_parameter : idlist  ':' simple_type
+//产生ast
 bool Parser::VALUE_PARAMETER(std::vector<VariableDeclAST*>* p, int type) {
 	std::vector<std::string> tmps;
 	if (IDLIST(&tmps)) {
@@ -1173,54 +933,12 @@ bool Parser::VALUE_PARAMETER(std::vector<VariableDeclAST*>* p, int type) {
 	return false;
 }
 
-bool Parser::PARAMETER(std::vector<VariableDeclAST*>* p) {
-	switch (lexer.get_type()) {
-	case tok_identifier:
-		if (VALUE_PARAMETER(p, 0)) {
-			return true;
-		}
-		break;
-	case tok_var:
-		lexer.getTOKEN(cur_count++);
-		if (VALUE_PARAMETER(p, 1)) {
-			return true;
-		}
-		break;
-	default:
-		break;
-	}
-	return false;
-}
-
-bool Parser::PARAMETER_LIST(std::vector<VariableDeclAST*>* p) {
-	if (PARAMETER(p)) {
-		lexer.getTOKEN(cur_count++);
-		if (PARAMETER1(p)) {
-			return true;
-		}
-	}
-	return false;
-}
-
-
-bool Parser::FORMAL_PARAMETER(std::vector<VariableDeclAST*>* p) {
-	switch (lexer.get_body()[0]) {
-	case '(':
-		lexer.getTOKEN(cur_count++);
-		if (PARAMETER_LIST(p)) {
-			lexer.getTOKEN(cur_count++);
-			return lexer.get_body()[0] == ')';
-		}
-		break;
-	case ':':case ';':
-		cur_count--;
-		return true;
-	default:
-		break;
-	}
-	return false;
-}
-
+/*subprogram_body->const_declarations
+type_declarations
+var_declarations
+subprogram_declarations
+compound_statement
+除了指针不同，和program_body一样*/
 bool Parser::SUBPROGRAM_BODY(std::vector<ConstAST*>*c_p, std::vector<ChangeNameTypeAST*>* s_p,
 	std::vector<VariableDeclAST*>* v_p, std::vector<FunctionAST*>*  f_p) {
 	bool result = true;
@@ -1318,175 +1036,12 @@ bool Parser::SUBPROGRAM_BODY(std::vector<ConstAST*>*c_p, std::vector<ChangeNameT
 	return false; 错误停止版*/
 }
 
-bool Parser::SUBPROGRAM_HEAD(std::vector<VariableDeclAST*>* p, std::string* name, int* f_type) {
-	switch (lexer.get_type()) {
-	case tok_function:
-		*f_type = 1; //代表function
-		lexer.getTOKEN(cur_count++);
-		if (lexer.get_type() == tok_identifier) {
-			*name = lexer.get_body();
-			lexer.getTOKEN(cur_count++);
-			if (FORMAL_PARAMETER(p)) {
-				lexer.getTOKEN(cur_count++);
-				if (lexer.get_body()[0] == ':') {
-					lexer.getTOKEN(cur_count++);
-					if (BASIC_TYPE()) {
-						lexer.getTOKEN(cur_count++);
-						return lexer.get_body()[0] == ';';
-					}
-				}
-			}
-		}
-		break;
-	case tok_procedure:
-		*f_type = 2; //代表procedure
-		lexer.getTOKEN(cur_count++);
-		if (lexer.get_type() == tok_identifier) {
-			*name = lexer.get_body();
-			lexer.getTOKEN(cur_count++);
-			if (FORMAL_PARAMETER(p)) {
-				lexer.getTOKEN(cur_count++);
-				return lexer.get_body()[0] == ';';
-			}
-		}
-		break;
-	case tok_begin:
-		//对应无subprogram情况
-		return false;
-	default:
-		std::cout << "error line" << std::setw(3) << lexer.get_row() << "：关键词 procedure 或 function 应在子程序开头" << std::endl;
-		break;
-	}
-	return false;
-}
-
-bool Parser::SUBPROGRAM(std::vector<FunctionAST*>* TOP_f_p) {
-	std::vector<VariableDeclAST*> p;
-	std::vector<ConstAST*> c_p;
-	std::vector<ChangeNameTypeAST*> name_p;
-	std::vector<VariableDeclAST*> v_p;
-	std::vector<FunctionAST*> f_p;
-	std::string name;
-	int f_type;
-	bool result = true;
-	if (!SUBPROGRAM_HEAD(&p, &name, &f_type)) {
-		//子程序 头部接收失败
-		std::cout << "error line" << std::setw(3) << lexer.get_row() << ":子程序头部错误" << std::endl;
-		result = false;
-		while (lexer.get_body()[0] != ';'&&lexer.get_type() != tok_begin
-			&& lexer.get_type() != tok_eof) {
-			lexer.getTOKEN(cur_count++);
-		}
-		if (lexer.get_type() == tok_begin || lexer.get_type() != tok_eof)
-			cur_count--;
-	}
-	lexer.getTOKEN(cur_count++);
-	BlocksType type = BlocksType::function; //默认情况， 避免头部接收失败时未初始化
-	switch (f_type) {
-	case 1:type = BlocksType::function;
-		break;
-	case 2:type = BlocksType::procedure;
-		break;
-	default:
-		break;
-	}
-	if (!SUBPROGRAM_BODY(&c_p, &name_p, &v_p, &f_p)) {
-		//子程序执行语句部分接收失败
-		result = false;
-		n_stack.push(NULL);
-		while (lexer.get_type() != tok_begin
-			&& lexer.get_type() != tok_function
-			&& lexer.get_type() != tok_procedure) {
-			lexer.getTOKEN(cur_count++);
-		}
-		cur_count--;
-	}
-	std::vector<VariableDeclAST*>::iterator it;
-	for (it = v_p.begin();
-		it != v_p.end(); it++) {
-		(*it)->isGlobal = 0;
-	}
-	BeginEndExprAST* tmp = (BeginEndExprAST*)n_stack.top();
-	n_stack.pop();
-	FunctionAST*f;
-	if (tmp == NULL) {
-		f = NULL;
-	}
-	else {
-		f = new FunctionAST(name, p, (BasicTypeAST*)ast_type,
-			c_p, name_p, v_p, f_p, tmp->body, type);
-		f->lineNum = lexer.get_row();
-	}
-	TOP_f_p->push_back(f);
-	//产生FUNCTIONAST并放入TOP_f_p中
-	return result;
-}
-
-bool Parser::SUBPROGRAM_DECLARATIONS(std::vector<FunctionAST*>* f_p) {
-	if (lexer.get_type() == tok_begin) {
-		//对应 subprogram_declarations->空
-		cur_count--;
-		return true;
-	}
-	bool result = true;
-	while (lexer.get_type() != tok_begin && lexer.get_type() != tok_eof)
-		/*lexer.get_type() == tok_function
-		|| lexer.get_type() == tok_procedure*/ {
-		result &= SUBPROGRAM(f_p);
-		lexer.getTOKEN(cur_count++);
-	}
-	if (lexer.get_type() == tok_begin)
-		cur_count--;
-	return result;
-}
-
-
-
-
-bool Parser::IDLIST(std::vector<std::string>* v_s) {
-	if (lexer.get_type() == tok_identifier) {
-		(*v_s).push_back(lexer.get_body());
-		lexer.getTOKEN(cur_count++);
-		return IDLIST1(v_s);
-	}
-	return false;
-}
-
-bool Parser::IDLIST1(std::vector<std::string>* v_s) {
-	int emp_count = cur_count - 1;//记录下若产生空，cur_count的值
-	if (lexer.get_type() == tok_delimiter
-		&& lexer.get_body()[0] == ',') {
-		lexer.getTOKEN(cur_count++);
-		if (lexer.get_type() == tok_identifier) {
-			(*v_s).push_back(lexer.get_body());
-			lexer.getTOKEN(cur_count++);
-			if (IDLIST1(v_s))
-				return true;
-		}
-	}
-	if (lexer.get_body()[0] == ':' || lexer.get_body()[0] == ')') { //对应 idlist'->空
-		cur_count = emp_count;
-		return true;
-	}
-	return false;
-}
-
-
-
-void Parser::start() {
-	lexer.getTOKEN(0);
-}
-
-
-
-
-
-//张姐函数
-
+//compound_statement : BEGIN statement_list END
+//产生ast
 bool Parser::COMPOUND_STATEMENT() {
 	if (lexer.get_type() == tok_begin) {
 		lexer.getTOKEN(cur_count++);
-		std::vector<ExprAST*> exBody;
+		std::vector<ExprAST*> exBody;//执行语句的ast
 		if (STATEMENT_LIST(&exBody)) {
 			lexer.getTOKEN(cur_count++);
 			if (lexer.get_type() == tok_end) {
@@ -1507,6 +1062,10 @@ bool Parser::COMPOUND_STATEMENT() {
 	}
 }
 
+/*
+statement_list->statement statement’
+statement’->;statement statement’|ε
+*/
 bool Parser::STATEMENT_LIST(std::vector<ExprAST*>* exBody) {
 	bool result = true;
 	if (!STATEMENT()) {
@@ -1545,7 +1104,14 @@ bool Parser::STATEMENT_LIST(std::vector<ExprAST*>* exBody) {
 
 }
 
-
+/*statement : variable ASSIGNOP expression
+|procedure_call
+|compound_statement
+|IF expression THEN statement else_part
+|WHILE expression DO statement
+|FOR ID ASSIGNOP expression updown expression DO statement
+|kong
+*/
 bool Parser::STATEMENT() {
 	bool result = true;
 	switch (lexer.get_type()) {
@@ -1908,8 +1474,6 @@ bool Parser::STATEMENT() {
 	return false;
 }
 
-
-
 bool Parser::STATEMENT1(std::vector<ExprAST*>* exBody) {
 	bool result = true;
 	if (lexer.get_type() == tok_end) {
@@ -1977,6 +1541,138 @@ bool Parser::STATEMENT1(std::vector<ExprAST*>* exBody) {
 	}
 }
 
+//variable->id id_varparts
+bool Parser::VARIABLE() {
+	if (lexer.get_type() == tok_identifier) { //获取终结符 id
+		VariableExprAST * name = new VariableExprAST(lexer.get_body(), lexer.get_row());
+		name->expr_type = ExprType::Variable;
+		n_stack.push(name);
+		lexer.getTOKEN(cur_count++);
+		if (ID_VARPARTS()) { //在后续函数中直接将AST生成并入栈，若成功接收则直接返回真
+			return true;
+		}
+	}
+	n_stack.push(NULL);
+	return false;
+}
+
+//id_varpart->[expression_list]|.id
+bool Parser::ID_VARPART() {
+	ExprAST* name = (ExprAST*)n_stack.top();
+	n_stack.pop();
+	if (lexer.get_body()[0] == '[') {
+		std::vector<ExprAST*> index;
+		lexer.getTOKEN(cur_count++);
+		if (EXPRESSION_LIST(&index)) {
+			ArrayVariableExprAST* tmp = new ArrayVariableExprAST(name, index, lexer.get_row());
+			tmp->expr_type = ExprType::ArrayVariable;
+			n_stack.push(tmp);
+			lexer.getTOKEN(cur_count++);
+			if (lexer.get_body()[0] == ']') {
+				return true;
+			}
+		}
+	}
+	else if (lexer.get_body()[0] == '.') {
+		lexer.getTOKEN(cur_count++);
+		if (lexer.get_type() == tok_identifier) {
+			RecordVariableExprAST* tmp = new RecordVariableExprAST(name, lexer.get_body(), lexer.get_row());
+			tmp->expr_type = ExprType::RecordVariable;
+			n_stack.push(tmp);
+			return true;
+		}
+	}
+	n_stack.push(name);
+	return false;
+}
+
+//id_varparts->id_varpart idvarparts|ε
+bool Parser::ID_VARPARTS() {
+	ExprAST* name = (ExprAST*)n_stack.top();
+	n_stack.pop();
+	std::string s = lexer.get_body();
+	Token_type type = lexer.get_type();
+	if (s[0] == '.' || s[0] == '[') { //对应结构体
+		n_stack.push(name);
+		if (ID_VARPART()) {
+			lexer.getTOKEN(cur_count++);
+			return ID_VARPARTS();
+		}
+	}
+	if (s[0] == ')' || s[0] == ',' || s[0] == ';' ||
+		s[0] == ']' || type == tok_addop || type == tok_assignop ||
+		!s.compare("do") || !s.compare("else") || type == tok_end ||
+		type == tok_mulop || !s.compare("of") || type == tok_relop ||
+		!s.compare("then") || !s.compare("to") || !s.compare("until")) {
+		//对应 ID_VARPARTS->空
+		n_stack.push(name);
+		cur_count--;
+		return true;
+	}
+
+	return false;
+}
+
+//procedure_call->id|id()|id(expression_list)
+bool Parser::PROCEDURE_CALL(bool* flag) {
+	bool result = true;
+	*flag = true;
+	int curNow = cur_count - 1;
+	if (lexer.get_type() == tok_identifier) {
+		std::string callee = lexer.get_body();
+		lexer.getTOKEN(cur_count++);
+		if (lexer.get_body().compare("(") == 0) {
+			lexer.getTOKEN(cur_count++);
+			std::vector<ExprAST*> index;
+			if (lexer.get_body()[0] == ')') {
+				CallProcedureExprAST* callP = new CallProcedureExprAST(callee, index, lexer.get_row());
+				callP->expr_type = ExprType::CallProcExpr;
+				n_stack.push(callP);
+				return true;
+			}
+			else if (EXPRESSION_LIST(&index)) {
+				lexer.getTOKEN(cur_count++);
+				if (lexer.get_body().compare(")") == 0) {
+					CallProcedureExprAST* callP = new CallProcedureExprAST(callee, index, lexer.get_row());
+					callP->expr_type = ExprType::CallProcExpr;
+					n_stack.push(callP);
+					return true;
+				}
+				else {
+					n_stack.push(NULL);
+					return false;
+				}
+			}
+			else {
+				n_stack.push(NULL);
+				return false;
+			}
+
+		}
+		else if (lexer.get_body().compare(";") == 0
+			|| lexer.get_type() == tok_end
+			|| lexer.get_body().compare("until") == 0
+			|| lexer.get_body().compare("else") == 0) {
+			cur_count--;
+			std::vector<ExprAST*> index;//绌哄€?
+			CallProcedureExprAST* callP = new CallProcedureExprAST(callee, index, lexer.get_row());
+			callP->expr_type = ExprType::CallProcExpr;
+			n_stack.push(callP);
+			return true;
+		}
+		else {
+			cur_count = curNow;
+			//lexer.getTOKEN(cur_count++);
+			*flag = false;
+			return false;
+		}
+	}
+	return false;
+
+
+}
+
+//else_part->else statement|ε
 bool Parser::ELSE_PART() {
 	bool result = true;
 	switch (lexer.get_type()) {
@@ -2014,6 +1710,7 @@ bool Parser::ELSE_PART() {
 	return false;
 }
 
+//case_body->branch_list|ε
 bool Parser::CASE_BODY(std::map<ExprAST*, ExprAST*>* body) {
 	bool result = true;
 	switch (lexer.get_type()) {
@@ -2044,6 +1741,10 @@ bool Parser::CASE_BODY(std::map<ExprAST*, ExprAST*>* body) {
 	return false;
 }
 
+/*
+branch_list->branch branch’
+branch’->;branch branch’|ε
+*/
 bool Parser::BRANCH_LIST(std::map<ExprAST*, ExprAST*>* body) {
 	bool result = true;
 	switch (lexer.get_type()) {
@@ -2065,6 +1766,10 @@ bool Parser::BRANCH_LIST(std::map<ExprAST*, ExprAST*>* body) {
 	return false;
 }
 
+/*
+branch_list->branch branch’
+branch’->;branch branch’|ε
+*/
 bool Parser::BRANCH1(std::map<ExprAST*, ExprAST*>* body) {
 	bool result = true;
 	switch (lexer.get_type()) {
@@ -2090,6 +1795,10 @@ bool Parser::BRANCH1(std::map<ExprAST*, ExprAST*>* body) {
 	return false;
 }
 
+/*
+branch’->;branch branch’|ε
+branch->const_list:statement|ε
+*/
 bool Parser::BRANCH(std::map<ExprAST*, ExprAST*>* body) {
 	bool result = true;
 	switch (lexer.get_type()) {
@@ -2131,6 +1840,11 @@ bool Parser::BRANCH(std::map<ExprAST*, ExprAST*>* body) {
 	return false;
 }
 
+/*
+const_list->const_value const_list’
+const_list’->,const_value const_list’|ε
+产生ast
+*/
 bool Parser::CONST_LIST(std::vector<ExprAST*>* body) {
 	bool result = true;
 	switch (lexer.get_type()) {
@@ -2204,6 +1918,11 @@ bool Parser::CONST_LIST(std::vector<ExprAST*>* body) {
 	return false;
 }
 
+/*
+branch->const_list:statement|ε
+const_list->const_value const_list’
+const_list’->,const_value const_list’|ε
+*/
 bool Parser::CONST_LIST1(std::vector<ExprAST*>* body) {
 	bool result = true;
 	if (lexer.get_body().compare(",") == 0) {
@@ -2232,7 +1951,428 @@ bool Parser::CONST_LIST1(std::vector<ExprAST*>* body) {
 	}
 }
 
+//updown->to|downto
+bool Parser::UPDOWN(bool* rd) {
+	if (lexer.get_type() == tok_keys) {
+		std::string to = "to";
+		std::string downto = "downto";
+		std::string body = lexer.get_body();
+		if (!body.compare(to)) {
+			*rd = true;
+			return true;
+		}
+		if (!body.compare(to)) {
+			*rd = false;
+			return true;
+		}
+	}
+	return false;
+}
 
+/*
+expression_list->expressionexp’
+exp’->,expressionexp’|ε
+*/
+bool Parser::EXPRESSION_LIST(std::vector<ExprAST*>* p) {
+	if (EXPRESSION()) {
+		ExprAST * AST = (ExprAST*)n_stack.top();
+		n_stack.pop();
+		p->push_back(AST);
+		lexer.getTOKEN(cur_count++);
+		return EXP1(p);
+	}
+	return false;
+}
+
+/*
+expression_list->expressionexp’
+exp’->,expressionexp’|ε
+*/
+bool Parser::EXP1(std::vector<ExprAST*>* e_v) {
+	if (lexer.get_body()[0] == ')' ||
+		lexer.get_body()[0] == ']') { //对应exp1->空
+		cur_count--;
+		//	n_stack.push(NULL);
+		return true;
+	}
+	if (lexer.get_body()[0] == ',') {
+		lexer.getTOKEN(cur_count++);
+		if (EXPRESSION()) {
+			ExprAST * AST = (ExprAST*)n_stack.top();
+			n_stack.pop();
+			e_v->push_back(AST);
+			lexer.getTOKEN(cur_count++);
+			return EXP1(e_v);
+		}
+	}
+	std::cout << "error line" << std::setw(3) << lexer.get_row() << ":EXP1 错误" << std::endl;
+	return false;
+}
+
+
+//expression->simple_expression relop simple_expression| simple_expression
+bool Parser::EXPRESSION() {
+	if (SIMPLE_EXPRESSION()) {
+		lexer.getTOKEN(cur_count++);
+		if (lexer.get_type() == tok_relop) {
+			BinaryOpKind op;
+			switch (lexer.get_body()[0]) {
+			case '=':op = BinaryOpKind::eqKind; break;
+			case '>':
+				if (lexer.get_body().length() >= 2)
+					op = BinaryOpKind::geKind;
+				else
+					op = BinaryOpKind::gtKind;
+				break;
+			case '<':
+				if (lexer.get_body().length() >= 2) {
+					switch (lexer.get_body()[1]) {
+					case '>':op = BinaryOpKind::ueqKind; break;
+					case '=':op = BinaryOpKind::leKind;  break;
+					default:
+						break;
+					}
+				}
+				else
+					op = BinaryOpKind::ltKind;
+			default:
+				break;
+			}
+			lexer.getTOKEN(cur_count++);
+			if (SIMPLE_EXPRESSION()) {
+				ExprAST* R = (ExprAST*)n_stack.top();
+				n_stack.pop();
+				ExprAST* L = (ExprAST*)n_stack.top();
+				n_stack.pop();
+				BinaryExprAST* AST = new BinaryExprAST(op, L, R, lexer.get_row());
+				AST->expr_type = ExprType::BinaryExpr;
+				n_stack.push(AST);
+				return true;
+			}
+			n_stack.push(NULL);
+			return false;
+		}
+		else {
+			//对应exp->simple_exp
+			cur_count--;
+			return true;
+		}
+	}
+
+	n_stack.push(NULL);
+	return false;
+}
+
+/*
+simple_expression->+termsexp’|-termsexp’|termsexp’
+sexp’->addoptermsexp’|ε
+*/
+bool Parser::SIMPLE_EXPRESSION() {
+	if (lexer.get_body()[0] == '-') {
+		UnaryOpKind op = UnaryOpKind::negKind;
+		lexer.getTOKEN(cur_count++);
+		if (TERM()) {
+			ExprAST * term = (ExprAST*)n_stack.top();
+			UnaryExprAST *n_term = new UnaryExprAST(op, term, term->lineNum);
+			n_term->expr_type = ExprType::UnaryExpr;
+			n_stack.push(n_term);
+			lexer.getTOKEN(cur_count++);
+			if (SEXP1()) {
+				/*BinaryExprAST* ast2 = (BinaryExprAST*)n_stack.top();
+				n_stack.pop();
+				if (ast2 != NULL) { //不等则说明不是SEXP1->空，否则说明是
+					ExprAST * ast1 = (ExprAST*)n_stack.top();
+					n_stack.pop();
+					ast2->LExpr = ast1;
+					n_stack.push(ast2);
+				} */
+				return true;
+			}
+		}
+	}
+	if (lexer.get_body()[0] == '+')
+		lexer.getTOKEN(cur_count++);//对应 SEXP->+TERM
+	if (TERM()) {
+		lexer.getTOKEN(cur_count++);
+		if (SEXP1()) {
+			/*BinaryExprAST* ast2 = (BinaryExprAST*)n_stack.top();
+			n_stack.pop();
+			if (ast2 != NULL) { //不等则说明不是SEXP1->空，否则说明是
+				ExprAST * ast1 = (ExprAST*)n_stack.top();
+				n_stack.pop();
+				ast2->LExpr = ast1;
+				n_stack.push(ast2);
+			}*/
+			return true;
+		}
+	}
+	return false;
+}
+
+/*
+simple_expression->+term sexp’|-term sexp’|term sexp’
+sexp’->addop term sexp’|ε
+*/
+bool Parser::SEXP1() {
+	Token_type tmp = lexer.get_type();
+	std::string tmps = lexer.get_body();
+	BinaryOpKind op;
+	if (lexer.get_type() == tok_addop) {
+		switch (lexer.get_body()[0]) {
+		case '+':op = BinaryOpKind::plusKind;  break;
+		case '-':op = BinaryOpKind::minusKind; break;
+		case 'o':op = BinaryOpKind::orKind;    break;
+		default:
+			break;
+		}
+		lexer.getTOKEN(cur_count++);
+		if (TERM()) {
+			ExprAST* R1 = (ExprAST*)n_stack.top();
+			n_stack.pop();
+			ExprAST* L1 = (ExprAST*)n_stack.top();
+			n_stack.pop();
+			BinaryExprAST* tmp1 = new BinaryExprAST(op, L1, R1, lexer.get_row());
+			n_stack.push(tmp1);
+			tmp1->expr_type = ExprType::BinaryExpr;
+			lexer.getTOKEN(cur_count++);
+			if (SEXP1()) {
+				/*	BinaryExprAST* tmp = (BinaryExprAST*)n_stack.top();
+					n_stack.pop();
+					if (tmp != NULL) {
+						tmp->LExpr = R1;
+						R1 = tmp;
+					}
+					BinaryExprAST* SEXP1AST = new BinaryExprAST(op, NULL, R1, lexer.get_row());
+					SEXP1AST->expr_type = ExprType::BinaryExpr;
+					n_stack.push(SEXP1AST); */
+				return true;
+			}
+		}
+		return false;
+	}
+
+	else if (tmps[0] == ')' || tmps[0] == '\'' || tmps[0] == ',' ||
+		tmps[0] == ';' || tmps[0] == ']' || !tmps.compare("do")
+		|| !tmps.compare("else") || !tmps.compare("end")
+		|| !tmps.compare("of") || !tmps.compare("then")
+		|| !tmps.compare("to") || !tmps.compare("until")
+		|| tmp == tok_relop) { //对应 sexp'->空
+		cur_count--;
+		//n_stack.push(NULL);
+		return true;
+	}
+	else return false;
+}
+
+/*
+term->factor term’
+term’->mulop factor term’|ε
+*/
+bool Parser::TERM() {
+	if (FACTOR()) {
+		lexer.getTOKEN(cur_count++);
+		if (TERM1()) {
+			/*BinaryExprAST* tmp = (BinaryExprAST*)n_stack.top();
+			n_stack.pop();
+			if (tmp != NULL) { //不是TERM->FACTOR
+				ExprAST * left = (ExprAST*)n_stack.top();
+				n_stack.pop();
+				tmp->LExpr = left;
+				n_stack.push(tmp);
+				return true;
+			} */
+			//于下层函数构造AST并存入stack
+			return true;
+		}
+	}
+	return false;
+}
+
+/*
+term->factor term’
+term’->mulop factor term’|ε
+*/
+bool Parser::TERM1() {
+	if (lexer.get_type() == tok_mulop) {
+		BinaryOpKind op;
+		switch (lexer.get_body()[0]) {
+		case '*':op = BinaryOpKind::mulKind;     break;
+		case '/':op = BinaryOpKind::divRealKind; break;
+		case 'a':op = BinaryOpKind::andKind;     break;
+		case 'd':op = BinaryOpKind::divKind;     break;
+		case 'm':op = BinaryOpKind::modKind;     break;
+		default:
+			break;
+		}
+		lexer.getTOKEN(cur_count++);
+		ExprAST*L = (ExprAST*)n_stack.top(); //获取之前存入的L端Expr
+		n_stack.pop();
+		if (FACTOR()) {
+			ExprAST *R = (ExprAST*)n_stack.top();
+			n_stack.pop();
+			BinaryExprAST* AST_TERM1 = new BinaryExprAST(op, L, R, lexer.get_row());
+			AST_TERM1->expr_type = ExprType::BinaryExpr;
+			n_stack.push(AST_TERM1);
+			lexer.getTOKEN(cur_count++);
+			if (TERM1()) {
+				return true;
+			}
+		}
+	}
+	else {
+		Token_type tmp = lexer.get_type();
+		std::string tmps = lexer.get_body();
+		if (tmps[0] == ')' || tmps[0] == '\'' || tmps[0] == ';' || tmps[0] == ',' ||
+			tmps[0] == ']' || tmp == tok_addop || !tmps.compare("do") ||
+			!tmps.compare("else") || tmp == tok_end ||
+			!tmps.compare("of") || tmp == tok_relop ||
+			!tmps.compare("then") || !tmps.compare("to") ||
+			!tmps.compare("until")) { //对应 term1->空
+			cur_count--;
+			return true;
+		}
+	}
+	return false;
+}
+
+//factor->’letter’|id|num|variable|id(expression_list)|(expression)|not factor|true|false|+factor|-factor
+bool Parser::FACTOR() {
+	int count_now = cur_count;//记录当前非终结符接收开始位置
+	Token_type left = factor;
+	Token_type var = variable;
+	Token_type newType;
+	std::string tmp_name = "";
+	ExprAST* v;
+	UnaryExprAST* tmp_v;
+	std::vector<ExprAST*> args;
+
+	UnaryOpKind op = UnaryOpKind::negKind;
+	int v_int;
+	double v_d;
+	bool v_b;
+	char** endPtr = NULL;
+	if (lexer.get_type() == tok_identifier) { //factor->variable检查
+		if (VARIABLE()) { //VARIABLE()将AST入栈
+			return true;
+		}
+	}
+	cur_count = count_now; //factor->variable未接收，复位
+	lexer.getTOKEN(cur_count - 1);//重新获取对应的TOKEN
+
+	if (lexer.get_type() == tok_identifier && n_stack.top() == NULL)
+		n_stack.pop();
+
+	switch (lexer.get_type()) {
+	case Token_type::tok_boolc:
+		if (lexer.get_body()[0] == 't')
+			v_b = true;
+		else
+			v_b = false;
+		v = new BoolExprAST(v_b, lexer.get_row());
+		v->expr_type = ExprType::BoolExpr;
+		n_stack.push(v);
+		return true;
+		break;
+	case Token_type::tok_identifier:
+		tmp_name = lexer.get_body();
+		lexer.getTOKEN(cur_count++);
+		newType = lexer.get_type();
+
+		if (newType == tok_delimiter && lexer.get_body()[0] == '(') {
+
+			lexer.getTOKEN(cur_count++);
+			if (lexer.get_body()[0] == ')') { //对应无参数函数调用
+				v = new CallFunctionExprAST(tmp_name, args, false, lexer.get_row());
+				v->expr_type = ExprType::CallFuncExpr;
+				n_stack.push(v);
+				return true;
+			}
+			else if (EXPRESSION_LIST(&args)) {//对应 factor ->id(exp)
+				lexer.getTOKEN(cur_count++);
+				if (lexer.get_body()[0] == ')') {
+					v = new CallFunctionExprAST(tmp_name, args, false, lexer.get_row());
+					v->expr_type = ExprType::CallFuncExpr;
+					n_stack.push(v);
+					return true;
+				}
+			}
+		}
+		else {
+			cur_count--;
+			v = new VariableExprAST(tmp_name, lexer.get_row());
+			v->expr_type = ExprType::Variable;
+			n_stack.push(v);
+			return true;
+		};//接收factor->id
+		break;
+	case Token_type::tok_integer:
+		v_int = stoi(lexer.get_body());
+		v = new NumberExprAST(v_int, lexer.get_row());
+		v->expr_type = ExprType::NumberExpr;
+		n_stack.push(v);
+		return true;
+	case Token_type::tok_real:
+		v_int = lexer.get_body().length();
+		v_d = strtod(lexer.get_body().data(), endPtr);
+		v = new RealExprAST(v_d, lexer.get_row());
+		v->expr_type = ExprType::RealExpr;
+		n_stack.push(v);
+		return true;
+	case Token_type::tok_not:
+		lexer.getTOKEN(cur_count++);
+		if (FACTOR()) {
+			ExprAST * tmp = (ExprAST*)n_stack.top();
+			n_stack.pop();
+			v = new UnaryExprAST(UnaryOpKind::notKind, tmp, lexer.get_row());
+			tmp_v = (UnaryExprAST*)v;
+			//	tmp_v->type = tmp->expr_type;
+			//  其他属性赋值
+
+			v->expr_type = ExprType::UnaryExpr;
+			n_stack.push(v);
+			return true;
+		}
+		break;
+	case Token_type::tok_letter:
+		v = new CharExprAST(lexer.get_body()[0], lexer.get_row());
+		v->expr_type = ExprType::CharExpr;
+		n_stack.push(v);
+		return true;
+	case Token_type::tok_delimiter:
+		if (lexer.get_body()[0] == '(') {
+			lexer.getTOKEN(cur_count++);
+			if (EXPRESSION()) {
+				lexer.getTOKEN(cur_count++);
+				if (lexer.get_body()[0] == ')')
+					return true;
+			}
+		}
+		break;
+	case Token_type::tok_addop:
+		if (lexer.get_body()[0] == '-') {
+			lexer.getTOKEN(cur_count++);
+			if (FACTOR()) {
+				op = UnaryOpKind::negKind;
+				v = (ExprAST*)n_stack.top();
+				n_stack.pop();
+				tmp_v = new UnaryExprAST(op, v, lexer.get_row());
+				tmp_v->expr_type = ExprType::UnaryExpr;
+				n_stack.push(tmp_v);
+				return true;
+			}
+		}
+		else if (lexer.get_body()[0] == '+') {
+			lexer.getTOKEN(cur_count++);
+			return FACTOR();
+		}
+		break;
+	default:
+		break;
+	}
+	std::cout << "error line" << std::setw(3) << lexer.get_row() << ":FACTOR accept failed. ";
+	std::cout << "body: " << lexer.get_body() << std::endl;
+	return false;
+}
 
 std::string Parser::TYPE_S(TypeName n) {
 	switch (n) {
